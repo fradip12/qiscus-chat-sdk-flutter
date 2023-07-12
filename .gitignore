@@ -20,3 +20,7 @@ doc/api/
 /coverage/
 /bin/
 .DS_Store
+.fvm/flutter_sdk
+.fvm/fvm_config.json
+.vscode/settings.json
+makefile

@@ -61,20 +61,32 @@ class AppConfig {
 
   State<Storage, void> hydrate() {
     return State<Storage, void>((s) {
-      baseUrl.match((it) => s.baseUrl = it, () {});
-      brokerLbUrl.match((it) => s.brokerLbUrl = it, () {});
-      brokerUrl.match((it) => s.brokerUrl = it, () {});
-      enableEventReport.match((it) => s.enableEventReport = it, () {});
-      enableRealtime.match((it) => s.isRealtimeEnabled = it, () {});
-      enableRealtimeCheck.match((it) => s.isRealtimeCheckEnabled = it, () {});
-      syncInterval.match((it) => s.syncInterval = it.milliseconds, () {});
+      baseUrl.match(() => null, (t) => s.baseUrl = t);
+      // brokerLbUrl.match((it) => s.brokerLbUrl = it, () {});
+      brokerLbUrl.match(() => null, (t) => s.brokerLbUrl = t);
+      // brokerUrl.match((it) => s.brokerUrl = it, () {});
+      brokerUrl.match(() => null, (t) => s.brokerUrl = t);
+      // enableEventReport.match((it) => s.enableEventReport = it, () {});
+      enableEventReport.match(() => null, (t) => s.enableEventReport = t);
+      // enableRealtime.match((it) => s.isRealtimeEnabled = it, () {});
+      enableRealtime.match(() => null, (t) => s.isRealtimeEnabled = t);
+      // enableRealtimeCheck.match((it) => s.isRealtimeCheckEnabled = it, () {});
+      enableRealtimeCheck.match(
+          () => null, (t) => s.isRealtimeCheckEnabled = t);
+      // syncInterval.match((it) => s.syncInterval = it.milliseconds, () {});
+      syncInterval.match(() => null, (t) => s.syncInterval = t.milliseconds);
+      // syncOnConnect.match(
+      //   (it) => s.syncIntervalWhenConnected = it.milliseconds,
+      //   () {},
+      // );
       syncOnConnect.match(
-        (it) => s.syncIntervalWhenConnected = it.milliseconds,
-        () {},
-      );
-      extras.match((it) => s.configExtras = it, () {});
-      enableSync.match((v) => s.isSyncEnabled = v, () {});
-      enableSyncEvent.match((v) => s.isSyncEventEnabled = v, () {});
+          () => null, (t) => s.syncIntervalWhenConnected = t.milliseconds);
+      // extras.match((it) => s.configExtras = it, () {});
+      extras.match(() => null, (t) => s.configExtras = t);
+      // enableSync.match((v) => s.isSyncEnabled = v, () {});
+      enableSync.match(() => null, (t) => s.isSyncEnabled = t);
+      // enableSyncEvent.match((v) => s.isSyncEventEnabled = v, () {});
+      enableSyncEvent.match(() => null, (t) => s.isSyncEventEnabled = t);
 
       return Tuple2(null, s);
     });
