@@ -69,7 +69,9 @@ class AppConfig {
       enableRealtimeCheck.match(() {}, (it) => s.isRealtimeCheckEnabled = it);
       syncInterval.match(() {}, (it) => s.syncInterval = it.milliseconds);
       syncOnConnect.match(
-          () {}, (it) => s.syncIntervalWhenConnected = it.milliseconds);
+        () {},
+        (it) => s.syncIntervalWhenConnected = it.milliseconds,
+      );
       extras.match(() {}, (it) => s.configExtras = it);
       enableSync.match(() {}, (v) => s.isSyncEnabled = v);
       enableSyncEvent.match(() {}, (v) => s.isSyncEventEnabled = v);

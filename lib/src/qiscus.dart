@@ -9,7 +9,6 @@ import 'package:async/async.dart';
 import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mqtt_client/mqtt_client.dart';
-import 'package:riverpod/riverpod.dart';
 
 import 'app_config/app_config.dart';
 import 'core.dart';
@@ -67,7 +66,6 @@ typedef StateTransformer<T>
 
 class QiscusSDK implements IQiscusSDK {
   static final instance = QiscusSDK();
-  final container = ProviderContainer();
   var _storage = Storage();
   Tuple2<MqttClient, Storage> get _deps => Tuple2(_mqtt, _storage);
   late final Logger _logger = Logger(_storage);
@@ -175,10 +173,13 @@ class QiscusSDK implements IQiscusSDK {
     _messageReceivedSubs$.stream,
     _synchronize(),
     _mqttUpdates.transform(mqttMessageReceivedTransformer),
-  ]).asyncMap((it) async {
-    markAsDelivered(roomId: it.chatRoomId, messageId: it.id).ignore();
-    return it;
-  }).asyncMap((it) => _triggerHook(QInterceptor.messageBeforeReceived, it));
+  ])
+      .tap((it) => markAsDelivered(
+            roomId: it.chatRoomId,
+            messageId: it.id,
+          ).ignore())
+      .asyncMap((it) => _triggerHook(QInterceptor.messageBeforeReceived, it))
+      .tap((m) => _setLastMessageId(m.id));
 
   late final Stream<QMessage> _messageRead$ = StreamGroup.mergeBroadcast([
     _synchronizeEvent().transform(syncMessageReadTransformerImpl),
@@ -358,6 +359,7 @@ class QiscusSDK implements IQiscusSDK {
 
   Future<QChatRoom> getChannel({
     required String uniqueId,
+    String? name,
   }) async {
     var t2 = getChannelImpl(uniqueId).run(_dio);
 
@@ -389,7 +391,11 @@ class QiscusSDK implements IQiscusSDK {
       return v.map((v) => QChatRoomWithMessages(v.first, v.second.toList()));
     }).run(_dio);
 
-    return t2.runOrThrow();
+    return t2.tap((data) {
+      if (data.messages.isNotEmpty) {
+        _setLastMessageIdFromMessages(data.messages);
+      }
+    }).runOrThrow();
   }
 
   Future<String> getJWTNonce() async {
@@ -403,7 +409,10 @@ class QiscusSDK implements IQiscusSDK {
   }) async {
     var t2 = getNextMessagesImpl(roomId, messageId, limit: limit).run(_dio);
 
-    return t2.map((it) => it.toList()).runOrThrow();
+    return t2
+        .tap((it) => _setLastMessageIdFromMessages(it))
+        .map((it) => it.toList())
+        .runOrThrow();
   }
 
   Future<List<QParticipant>> getParticipants({
@@ -427,7 +436,9 @@ class QiscusSDK implements IQiscusSDK {
     required int messageId,
     int? limit,
   }) async {
-    var t2 = getPreviousMessagesImpl(roomId, messageId, limit: limit).run(_dio);
+    var t2 = getPreviousMessagesImpl(roomId, messageId, limit: limit)
+        .run(_dio)
+        .tap((v) => _setLastMessageIdFromMessages(v));
 
     return t2.map((it) => it.toList()).runOrThrow();
   }
@@ -661,11 +672,14 @@ class QiscusSDK implements IQiscusSDK {
       () => _triggerHook(QInterceptor.messageBeforeSent, message),
     );
     var t3 = t2.flatMap((message) => sendMessageImpl(message).run(_dio));
-    return t3.map((state) {
-      var res = state.run(_storage.messages);
-      _storage.messages = res.second.toSet();
-      return res.first;
-    }).runOrThrow();
+    return t3
+        .map((state) {
+          var res = state.run(_storage.messages);
+          _storage.messages = res.second.toSet();
+          return res.first;
+        })
+        .tap((m) => _setLastMessageId(m.id))
+        .runOrThrow();
   }
 
   void setCustomHeader(Map<String, String> headers) {
@@ -779,21 +793,22 @@ class QiscusSDK implements IQiscusSDK {
         .then((_) => null);
   }
 
-  MqttConnectionState? get _mqttConnectionState =>
-      _mqtt.connectionStatus?.state;
   bool get _mqttIsConnected =>
       _mqtt.connectionStatus?.state == MqttConnectionState.connected;
 
   Future<void> _doOnConnected(void Function() cb) async {
-    await _connected();
-    if (_mqttIsConnected) {
-      cb();
-    }
+    try {
+      await _connected().timeout(const Duration(seconds: 1)).then((_) {
+        if (_mqttIsConnected) {
+          cb();
+        }
+      }).ignoreAwaited();
+    } catch (_) {}
   }
 
   Future<void> _connectMqtt() async {
     if (_storage.isRealtimeEnabled) {
-      await _mqtt.connect();
+      await _mqtt.connect().ignoreAwaited();
     }
 
     await _doOnConnected(() {
@@ -988,28 +1003,32 @@ class QiscusSDK implements IQiscusSDK {
     ).run(_dio).map((it) => it.toList()).runOrThrow();
   }
 
+  /// Manually close realtime connection to server.
+  /// Returning [bool] wheter the operation is successful or not.
   Future<bool> closeRealtimeConnection() async {
-    if (isLogin) {
+    if (!isLogin) return false;
+
+    try {
       storage.isRealtimeManuallyClosed = true;
-      tryCatch(() async {
-        _mqtt.disconnect();
-        return true;
-      }).runOrThrow().ignore();
+      _mqtt.disconnect();
       return true;
+    } catch (_) {
+      return false;
     }
-    return false;
   }
 
+  /// Manually open realtime connection to server.
+  /// Returning [bool] wheter the operation is successful or not.
   Future<bool> openRealtimeConnection() async {
-    if (isLogin && storage.isRealtimeEnabled) {
+    if (!isLogin && !storage.isRealtimeEnabled) return false;
+
+    try {
       storage.isRealtimeManuallyClosed = false;
-      tryCatch(() async {
-        await _mqtt.connect();
-        return true;
-      }).runOrThrow().ignore();
+      await _mqtt.connect().timeout(const Duration(seconds: 1));
       return true;
+    } catch (_) {
+      return false;
     }
-    return false;
   }
 
   String _generateUniqueId() =>
@@ -1143,17 +1162,29 @@ class QiscusSDK implements IQiscusSDK {
     );
     return sdk;
   }
-}
 
-extension _TaskExt<T> on Task<T> {
-  Future<void> runIgnored() async {
-    run().ignore();
+  void _setLastMessageId(int lastId) {
+    if (_storage.lastMessageId > lastId) return;
+
+    _storage.currentUser?.lastMessageId = lastId;
+    _storage.lastMessageId = lastId;
+  }
+
+  void _setLastMessageIdFromMessages(Iterable<QMessage> messages) {
+    var lastId = messages.sortWithDate((m) => m.timestamp).last.id;
+    _setLastMessageId(lastId);
   }
 }
 
 extension _TaskEither<L extends String, R> on TaskEither<L, R> {
   Future<R> runOrThrow() async {
     return run().then((it) => it.toThrow());
+  }
+
+  TaskEither<L, R> tap(void Function(R) onRight) {
+    return map((v) {
+      return v;
+    });
   }
 }
 
